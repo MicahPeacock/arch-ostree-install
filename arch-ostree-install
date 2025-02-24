@@ -1,0 +1,52 @@
+#!/bin/bash
+
+mount -o remount,size=4G /run/archiso/cowspace
+pacman -Sy --noconfirm
+
+mkdir /mnt/setup
+
+pacman -S --noconfirm git
+git clone https://github.com/M1cha/archlinux-ostree.git /mnt/setup/archlinux-ostree
+export PATH="/mnt/setup/archlinux-ostree:$PATH"
+
+git clone https://github.com/MicahPeacock/hyprland-rootfs-script /mnt/setup/ostree-build-script
+
+arch-ostree prepare_live_env
+ostree admin init-fs --sysroot /mnt --modern /mnt
+ostree admin stateroot-init --sysroot /mnt archlinux
+ostree config --repo /mnt/ostree/repo set sysroot.bootprefix 1
+
+arch-ostree build_builder_container
+arch-ostree \
+    --aur-dir /mnt/setup/aur \
+    --pacman-cache /mnt/setup/pacman_cache \
+    --rootfs-dir /mnt/setup/rootfs \
+    build_rootfs_directory /mnt/setup/ostree-build-script/build_rootfs.sh
+arch-ostree \
+    --rootfs-dir /mnt/setup/rootfs \
+    --ostree-repo /mnt/ostree/repo \
+    commit_rootfs_directory -- -v -b archlinux
+
+ostree checkout \
+    --repo /mnt/ostree/repo \
+    --require-hardlinks archlinux \
+    /mnt/setup/deployment
+
+arch-ostree \
+    --deploy-env-dir /mnt/setup/deployment \
+    --sysroot-dir /mnt \
+    deploy_env -- /bin/bash
+
+grub-install --target x86_64-efi --efi-directory /efi --bootloader-id=archlinux
+ln -sf ../loader/grub.cfg /boot/grub/grub.cfg
+
+ostree admin deploy \
+     --os=archlinux \
+     --no-merge \
+     --karg=root=UUID="MY_UUID" \
+     --karg=rw \
+     archlinux
+
+genfstab -U /mnt >> /mnt/ostree/deploy/archlinux/deploy/*/etc/fstab
+
+mkdir /mnt/home
